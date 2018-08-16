@@ -15,8 +15,6 @@ Buzzer buzzer;
 bool on = true;
 bool overrideFuel = false;
 
-
-int activeKey = 0;
 String keys[10] = {
     "6068544313145972",
     "3494483602458823",
@@ -29,6 +27,16 @@ String keys[10] = {
     "5261623041104505",
     "7620644521131020"
 };
+
+static const char hexa[] = "0123456789ABCDEF";
+
+bool goodCode( const String& s ) {
+    for ( int i = 0; i != 10; i++ ) {
+        if ( keys[i] == s )
+            return true;
+    }
+    return false;
+}
 
 struct Tones {
     void step() {
@@ -81,7 +89,7 @@ void updateLcd( String code ) {
     lcd.setCursor( 0, 0 );
     lcd.clear();
     lcd.print( code.c_str() );
-    lcd.write( '0' + abs( encoder.bigSteps() ) % 10 );
+    lcd.write( hexa[ abs( encoder.bigSteps() ) % 16 ] );
     lcd.setCursor( code.length(), 0 );
 }
 
@@ -112,16 +120,16 @@ struct Input {
     void nextPosition() {
         char buff[ 2 ];
         buff[ 1 ] = 0;
-        buff[ 0 ] = '0' + abs( encoder.bigSteps() + _direction ) % 10;
+        buff[ 0 ] = hexa[ abs( encoder.bigSteps() + _direction ) % 16 ];
         _code = _code + buff;
         _lastEncVal = 0;
         encoder.reset();
         _direction *= 1;
-        if ( _code.length() == 16 && _code == keys[ activeKey ] ) {
+        if ( _code.length() == 16 && goodCode( _code ) ) {
             famfare();
             digitalWrite( MOTOR_PIN, LOW );
         }
-        if ( _code.length() == 16 && _code != keys[ activeKey ] ) {
+        if ( _code.length() == 16 && !goodCode( _code ) ) {
             fuckup();
             _code = "";
             return;
@@ -141,11 +149,6 @@ void sendInfo( WiFiClient& client ) {
     client.println( counter++ );
     client.println( "Controls: \na: alert\nb: turn off\nc: turn on\nn: back to normal\nd: reset" );
 
-    client.print( "Active key: " );
-    client.print( activeKey );
-    client.print( ": " );
-    client.println( keys[ activeKey ] );
-
     client.print( "Fuel state: " );
     client.println( analogRead( FUEL_PIN ) );
 
@@ -154,13 +157,15 @@ void sendInfo( WiFiClient& client ) {
 }
 
 void doAlert() {
-    lcd.noBacklight();
-    delay( 10 );
-    lcd.backlight();
-    delay( 100 );
-    lcd.noBacklight();
-    delay( 50 );
-    lcd.backlight();
+    for ( int i = 0; i != 5; i++ ) {
+        lcd.noBacklight();
+        delay( 100 );
+        lcd.backlight();
+        delay( 100 );
+        lcd.noBacklight();
+        delay( 50 );
+        lcd.backlight();
+    }
     fuckup();
 }
 
@@ -182,15 +187,23 @@ void turnOn() {
 }
 
 void checkFuel() {
+    static unsigned long long warn = 0;
+    static unsigned long long shutdown = 0 ;
     int value = analogRead( FUEL_PIN );
-    if ( value < 1300 ) {
+    if ( value > 1300 ) {
+        turnOn();
+        warn = millis() + 2000;
+        shutdown = millis() + 6000;
+        return;
+    }
+    if ( shutdown < millis() ) {
         turnOff();
         return;
     }
-    else
-        turnOn();
-    if ( value < 1900 )
+    else if ( warn < millis() ) {
+        warn = millis() + 1500;
         fuckup();
+    }
 }
 
 void reset() {
@@ -248,8 +261,6 @@ void handleClient( WiFiClient& client ) {
                 digitalWrite( MOTOR_PIN, HIGH );
                 break;
             }
-            if ( c > '0' && c < '9' )
-                activeKey = c - '0';
         }
         if ( millis() > nextInfo ) {
             sendInfo( client );
@@ -262,7 +273,7 @@ void remoteControl( void* ) {
     WiFiServer server( 4242 );
     server.begin();
     while( true ) {
-        delay( 100 );
+        delay( 1000 );
         auto client = server.available();
         if ( client )
             handleClient( client );
@@ -285,6 +296,14 @@ void setup() {
     WiFi.softAP( "TimeMachine", "bramboroveknedliky" );
     Serial.print("IP: ");
     Serial.println(WiFi.softAPIP());
+    // WiFi.begin("SvetlaZelenaPrisera", "materidouska");
+    // while( WiFi.status() != WL_CONNECTED ) {
+    //     Serial.print("Connecting... ");
+    //     Serial.println( WiFi.status() );
+    //     delay(1000);
+    // }
+    // Serial.print("IP: ");
+    // Serial.println(WiFi.localIP());
 
     Serial.println("Initializing LCD");
     lcd.init();
@@ -305,7 +324,7 @@ int nextCheck = millis() + 2000;
 void loop() {
     if( !overrideFuel && nextCheck < millis() ) {
         checkFuel();
-        nextCheck = millis() + 2000;
+        nextCheck = millis() + 500;
     }
     if ( !on )
         return;

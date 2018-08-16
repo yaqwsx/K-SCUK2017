@@ -23,7 +23,7 @@ struct Buzzer {
     }
 
     void stop( dac_channel_t channel ) {
-        dac_output_disable( channel );
+        dac_output_voltage( channel, 0 );
     }
 
     static void _dacCosineEnable( dac_channel_t channel ) {
